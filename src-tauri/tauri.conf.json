@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "X Knowledge Base",
+  "version": "0.1.0",
+  "identifier": "dev.local.xknowledgebase",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "X Knowledge Base",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 860,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: https:; media-src 'self' asset: http://asset.localhost https:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
