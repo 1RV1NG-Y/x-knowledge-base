@@ -22,7 +22,22 @@
   let dragOffsetY = 0;
 
   const localUrl = (path?: string): string | undefined => path ? convertFileSrc(path) : undefined;
-  const imageSource = (item: Media): string | undefined => localUrl(item.localPath) ?? item.remoteUrl ?? item.previewUrl;
+  function twitterFeedImage(url?: string): string | undefined {
+    if (!url) return undefined;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== 'pbs.twimg.com' || !parsed.pathname.startsWith('/media/')) return undefined;
+      parsed.searchParams.set('name', 'small');
+      return parsed.toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  const originalImageSource = (item: Media): string | undefined => localUrl(item.localPath) ?? item.remoteUrl ?? item.previewUrl;
+  const imageSource = (item: Media): string | undefined =>
+    localUrl(item.thumbnailPath) ?? item.previewUrl ?? twitterFeedImage(item.remoteUrl) ?? originalImageSource(item);
+  const imageFallback = (item: Media): string | undefined => originalImageSource(item);
   const videoUrl = (item: Media): string | undefined => item.remoteUrl;
   const preview = (item: Media): string | undefined => localUrl(item.thumbnailPath) ?? item.previewUrl;
 
@@ -78,9 +93,8 @@
     }
   }
 
-  async function openViewer(item: Media, event: MouseEvent): Promise<void> {
-    const image = (event.currentTarget as HTMLButtonElement).querySelector('img');
-    const source = image?.currentSrc || imageSource(item);
+  async function openViewer(item: Media): Promise<void> {
+    const source = originalImageSource(item);
     if (!source) return;
     viewer = { source, fallback: item.remoteUrl ?? item.previewUrl };
     zoom = 1;
@@ -181,6 +195,7 @@
               src={preview(item)}
               alt="Video preview"
               loading="lazy"
+              decoding="async"
               onerror={(event) => useImageFallback(event, item.previewUrl)}
             />
           {:else}
@@ -215,15 +230,16 @@
             class="image-open"
             type="button"
             aria-label="Open image viewer"
-            onclick={(event) => void openViewer(item, event)}
+            onclick={() => void openViewer(item)}
           >
             <img
               src={imageSource(item)}
               alt="Post attachment"
               loading="lazy"
+              decoding="async"
               width={item.width}
               height={item.height}
-              onerror={(event) => useImageFallback(event, item.remoteUrl ?? item.previewUrl)}
+              onerror={(event) => useImageFallback(event, imageFallback(item))}
             />
           </button>
         {:else}
@@ -268,6 +284,7 @@
       <img
         src={viewer.source}
         alt="Expanded post attachment"
+        decoding="async"
         draggable="false"
         style:transform={`translate(${panX}px, ${panY}px) scale(${zoom})`}
         onerror={(event) => useImageFallback(event, viewer?.fallback)}
