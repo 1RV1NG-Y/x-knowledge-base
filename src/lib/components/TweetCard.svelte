@@ -43,7 +43,7 @@
 <article class:problem={failed || unavailable} aria-labelledby={`tweet-${tweet.id}-author`}>
   <div class="avatar" aria-hidden="true">
     {#if avatarSource()}
-      <img src={avatarSource()} alt="" loading="lazy" onerror={fallbackAvatar} />
+      <img src={avatarSource()} alt="" loading="eager" decoding="async" onerror={fallbackAvatar} />
     {:else}
       <span>{(tweet.author?.displayName ?? '?').slice(0, 1).toUpperCase()}</span>
     {/if}

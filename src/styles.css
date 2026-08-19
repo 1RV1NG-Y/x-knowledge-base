@@ -150,7 +150,7 @@ main { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, var(
 .feed-heading h1 { font-size: 1.125rem; line-height: 1.3; margin: 0; letter-spacing: -0.01em; }
 .feed-heading p { margin: var(--space-1) 0 0; color: var(--muted); font-size: 0.75rem; }
 .tweet-list { border: 1px solid var(--line); border-radius: var(--radius-2); overflow: hidden; background: var(--panel); box-shadow: var(--shadow); }
-.tweet-list article { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--line); content-visibility: auto; contain-intrinsic-size: auto 14rem; }
+.tweet-list article { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: var(--space-3); padding: var(--space-4); border-bottom: 1px solid var(--line); }
 .tweet-list article:last-child { border-bottom: 0; }
 .tweet-list article:hover { background: color-mix(in srgb, var(--surface) 35%, var(--panel)); }
 .tweet-list article.problem { border-left: 2px solid var(--warning); padding-left: calc(var(--space-4) - 2px); }
