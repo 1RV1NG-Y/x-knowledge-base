@@ -403,12 +403,17 @@ impl Database {
 
         let limit = request.limit.clamp(1, 100) as i64;
         let offset = request.offset.min(1_000_000) as i64;
+        let chronology = match request.sort_order.as_deref().unwrap_or("newest") {
+            "newest" => "DESC",
+            "oldest" => "ASC",
+            value => return Err(format!("Unsupported sort order: {value}")),
+        };
         let select_sql = format!(
             "SELECT DISTINCT t.id, t.text, l.archive_text, t.created_at, l.liked_at,
                     t.canonical_url, t.enrichment_status, t.enrichment_error,
                     u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path
              {from}{where_sql}
-             ORDER BY COALESCE(l.liked_at, t.created_at, t.imported_at) DESC, t.id DESC
+             ORDER BY CAST(t.id AS INTEGER) {chronology}
              LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
@@ -759,6 +764,62 @@ mod tests {
             })
             .unwrap();
         assert_eq!(empty.total, 0);
+    }
+
+    #[test]
+    fn chronology_sort_is_numeric_and_reversible() {
+        let (_temp, db) = database();
+        let parsed = ParsedArchive {
+            profile: profile("1"),
+            likes: ["99999", "100000"]
+                .into_iter()
+                .map(|id| SparseLike {
+                    id: id.into(),
+                    text: Some(format!("Post {id}")),
+                    canonical_url: format!("https://x.com/i/web/status/{id}"),
+                    liked_at: None,
+                })
+                .collect(),
+            failed: 0,
+        };
+        db.import_archive(&parsed, Path::new("archive")).unwrap();
+
+        let newest = db
+            .get_tweets(TweetQuery {
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+        let oldest = db
+            .get_tweets(TweetQuery {
+                sort_order: Some("oldest".into()),
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            newest
+                .items
+                .iter()
+                .map(|tweet| tweet.id.as_str())
+                .collect::<Vec<_>>(),
+            ["100000", "99999"]
+        );
+        assert_eq!(
+            oldest
+                .items
+                .iter()
+                .map(|tweet| tweet.id.as_str())
+                .collect::<Vec<_>>(),
+            ["99999", "100000"]
+        );
+        assert!(db
+            .get_tweets(TweetQuery {
+                sort_order: Some("random".into()),
+                ..Default::default()
+            })
+            .is_err());
     }
 
     #[test]
