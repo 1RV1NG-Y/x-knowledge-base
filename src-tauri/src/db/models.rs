@@ -77,6 +77,7 @@ pub struct TweetQuery {
     pub before: Option<String>,
     pub after: Option<String>,
     pub status: Option<String>,
+    pub sort_order: Option<String>,
     #[serde(default)]
     pub offset: u32,
     #[serde(default = "default_limit")]

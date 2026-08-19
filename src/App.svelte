@@ -7,7 +7,7 @@
   import SearchBar from './lib/components/SearchBar.svelte';
   import TweetCard from './lib/components/TweetCard.svelte';
   import { getImportStatus, getProfiles, getTweet, getTweets, importArchive, openOriginal, retryEnrichment, setActiveProfile } from './lib/api';
-  import type { Filters, ImportSummary, JobStatus, ProfileState, Tweet, TweetQuery } from './lib/types';
+  import type { Filters, ImportSummary, JobStatus, ProfileState, SortOrder, Tweet, TweetQuery } from './lib/types';
 
   const PAGE_SIZE = 40;
   const emptyFilters: Filters = { author: '', mediaType: '', after: '', before: '', status: '' };
@@ -15,6 +15,7 @@
   let searchInput = $state('');
   let search = $state('');
   let filters = $state<Filters>({ ...emptyFilters });
+  let sortOrder = $state<SortOrder>('newest');
   let tweets = $state<Tweet[]>([]);
   let total = $state(0);
   let loading = $state(true);
@@ -55,6 +56,7 @@
       before: filters.before || undefined,
       after: filters.after || undefined,
       status: filters.status || undefined,
+      sortOrder,
       offset,
       limit
     };
@@ -123,6 +125,12 @@
 
   function clearFilters(): void {
     filters = { ...emptyFilters };
+    void loadTweets();
+  }
+
+  function toggleSortOrder(): void {
+    sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
+    expandedId = undefined;
     void loadTweets();
   }
 
@@ -294,6 +302,16 @@
           <h1 id="feed-title">{search ? `Results for “${search}”` : 'Liked posts'}</h1>
           <p>{loading ? 'Searching local archive…' : `${total.toLocaleString()} ${total === 1 ? 'post' : 'posts'}`}</p>
         </div>
+        <button
+          class="sort-button"
+          type="button"
+          aria-label={sortOrder === 'newest' ? 'Show oldest posts first' : 'Show newest posts first'}
+          title="Sort by post chronology"
+          onclick={toggleSortOrder}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 7h10M8 12h7M8 17h4M4 5v14m0 0-2.5-2.5M4 19l2.5-2.5" /></svg>
+          {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
+        </button>
       </div>
 
       {#if actionError}

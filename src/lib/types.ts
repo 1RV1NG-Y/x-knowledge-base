@@ -42,6 +42,8 @@ export interface Tweet {
   quote?: Quote;
 }
 
+export type SortOrder = 'newest' | 'oldest';
+
 export interface TweetQuery {
   search?: string;
   author?: string;
@@ -49,6 +51,7 @@ export interface TweetQuery {
   before?: string;
   after?: string;
   status?: string;
+  sortOrder: SortOrder;
   offset: number;
   limit: number;
 }
