@@ -1,0 +1,40 @@
+[package]
+name = "x-knowledge-base"
+version = "0.1.0"
+description = "A local-first X likes knowledge base"
+authors = ["X Knowledge Base contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "x_knowledge_base_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "x-knowledge-base"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1", features = ["fs", "process", "rt", "sync", "time"] }
+url = "2"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "zstd"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
