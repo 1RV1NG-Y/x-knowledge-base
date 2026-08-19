@@ -194,7 +194,7 @@
             <img
               src={preview(item)}
               alt="Video preview"
-              loading="lazy"
+              loading="eager"
               decoding="async"
               onerror={(event) => useImageFallback(event, item.previewUrl)}
             />
@@ -235,7 +235,7 @@
             <img
               src={imageSource(item)}
               alt="Post attachment"
-              loading="lazy"
+              loading="eager"
               decoding="async"
               width={item.width}
               height={item.height}
