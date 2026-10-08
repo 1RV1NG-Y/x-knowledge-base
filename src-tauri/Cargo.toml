@@ -38,3 +38,6 @@ tempfile = "3"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[profile.dev]
+debug = "line-tables-only"

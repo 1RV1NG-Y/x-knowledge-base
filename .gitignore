@@ -10,3 +10,8 @@ twitter-*.zip
 .DS_Store
 *.swp
 *.swo
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
