@@ -56,5 +56,3 @@ src-tauri/src/media     Local media cache
 src-tauri/src/db        SQLite storage and full-text search
 src-tauri/migrations    Database schema
 ```
-
-The original design brief is in [x_knowledge_base_mvp_spec.md](x_knowledge_base_mvp_spec.md).

@@ -15,3 +15,6 @@ twitter-*.zip
 *.db
 *.db-shm
 *.db-wal
+
+# Specs and design docs (kept locally, not part of the repo)
+x_knowledge_base_mvp_spec.md
