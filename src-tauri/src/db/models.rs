@@ -66,11 +66,24 @@ pub struct Tweet {
     pub author: Option<Author>,
     pub media: Vec<Media>,
     pub quote: Option<Quote>,
+    pub playlist_ids: Vec<i64>,
+    pub playlist_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub item_count: u64,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TweetQuery {
+    pub playlist_id: Option<i64>,
     pub search: Option<String>,
     pub author: Option<String>,
     pub media_type: Option<String>,

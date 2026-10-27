@@ -1,19 +1,26 @@
 <script lang="ts">
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import type { Tweet } from '../types';
+  import type { Playlist, Tweet } from '../types';
   import MediaGrid from './MediaGrid.svelte';
+  import PlaylistMenu from './PlaylistMenu.svelte';
 
   interface Props {
     tweet: Tweet;
+    playlists: Playlist[];
     expanded?: boolean;
     detailBusy?: boolean;
     actionBusy?: boolean;
     ondetail: (id: string) => void;
     onretry: (id: string) => void;
     onopen: (id: string) => void;
+    onplaylisttoggle: (id: string, playlistId: number, included: boolean) => Promise<void>;
+    onplaylistcreate: (id: string, name: string) => Promise<boolean>;
   }
 
-  let { tweet, expanded = false, detailBusy = false, actionBusy = false, ondetail, onretry, onopen }: Props = $props();
+  let {
+    tweet, playlists, expanded = false, detailBusy = false, actionBusy = false,
+    ondetail, onretry, onopen, onplaylisttoggle, onplaylistcreate
+  }: Props = $props();
 
   const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
@@ -62,6 +69,10 @@
       {#if unavailable}<span class="status unavailable">Unavailable</span>{/if}
     </header>
 
+    {#if tweet.playlistNote}
+      <p class="playlist-note">{tweet.playlistNote}</p>
+    {/if}
+
     {#if failed || unavailable}
       <div class="notice" role="status">
         <strong>{unavailable ? 'This post is no longer available.' : 'Post enrichment failed.'}</strong>
@@ -101,6 +112,12 @@
       <button type="button" class="text-button" onclick={() => ondetail(tweet.id)} disabled={detailBusy} aria-expanded={expanded}>
         {detailBusy ? 'Loading…' : expanded ? 'Less detail' : 'Details'}
       </button>
+      <PlaylistMenu
+        {playlists}
+        selectedIds={tweet.playlistIds}
+        ontoggle={(playlistId, included) => onplaylisttoggle(tweet.id, playlistId, included)}
+        oncreate={(name) => onplaylistcreate(tweet.id, name)}
+      />
       {#if failed}
         <button type="button" class="text-button retry" onclick={() => onretry(tweet.id)} disabled={actionBusy}>
           {actionBusy ? 'Retrying…' : 'Retry enrichment'}

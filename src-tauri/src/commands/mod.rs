@@ -5,7 +5,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::{
     archive,
-    db::models::{ImportSummary, JobStatus, ProfileState, Tweet, TweetPage, TweetQuery},
+    db::models::{ImportSummary, JobStatus, Playlist, ProfileState, Tweet, TweetPage, TweetQuery},
     Backend,
 };
 
@@ -147,6 +147,62 @@ pub async fn set_active_profile(
     tokio::task::spawn_blocking(move || db.set_active_profile(&profile_id))
         .await
         .map_err(|error| format!("Profile switch task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn get_playlists(state: State<'_, Arc<Backend>>) -> Result<Vec<Playlist>, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db.get_playlists())
+        .await
+        .map_err(|error| format!("Playlist query task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn create_playlist(
+    name: String,
+    description: String,
+    state: State<'_, Arc<Backend>>,
+) -> Result<Playlist, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db.create_playlist(&name, &description))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn update_playlist(
+    id: i64,
+    name: String,
+    description: String,
+    state: State<'_, Arc<Backend>>,
+) -> Result<Playlist, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db.update_playlist(id, &name, &description))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn delete_playlist(id: i64, state: State<'_, Arc<Backend>>) -> Result<(), String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db.delete_playlist(id))
+        .await
+        .map_err(|error| format!("Playlist task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn set_playlist_membership(
+    playlist_id: i64,
+    tweet_id: String,
+    included: bool,
+    state: State<'_, Arc<Backend>>,
+) -> Result<Playlist, String> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || {
+        db.set_playlist_membership(playlist_id, &tweet_id, included)
+    })
+    .await
+    .map_err(|error| format!("Playlist task failed: {error}"))?
 }
 
 #[tauri::command]

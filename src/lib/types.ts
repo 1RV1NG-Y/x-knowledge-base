@@ -40,11 +40,22 @@ export interface Tweet {
   author?: Author;
   media: Media[];
   quote?: Quote;
+  playlistIds: number[];
+  playlistNote?: string;
+}
+
+export interface Playlist {
+  id: number;
+  name: string;
+  description: string;
+  itemCount: number;
+  updatedAt: string;
 }
 
 export type SortOrder = 'newest' | 'oldest';
 
 export interface TweetQuery {
+  playlistId?: number;
   search?: string;
   author?: string;
   mediaType?: MediaType;

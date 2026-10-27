@@ -13,7 +13,8 @@ use crate::{
     enrichment::NormalizedTweet,
 };
 use models::{
-    Author, ImportSummary, Media, Profile, ProfileState, Quote, Tweet, TweetPage, TweetQuery,
+    Author, ImportSummary, Media, Playlist, Profile, ProfileState, Quote, Tweet, TweetPage,
+    TweetQuery,
 };
 
 const MIGRATIONS: &[(i64, &str)] = &[
@@ -24,6 +25,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         include_str!("../../migrations/0003_retry_locked_enrichments.sql"),
     ),
     (4, include_str!("../../migrations/0004_profiles.sql")),
+    (5, include_str!("../../migrations/0005_playlists.sql")),
 ];
 
 #[derive(Debug, Clone)]
@@ -390,11 +392,20 @@ impl Database {
     pub fn get_tweets(&self, request: TweetQuery) -> Result<TweetPage, String> {
         let connection = self.connect()?;
         let (where_sql, values, _) = build_filters(&request)?;
-        let from = " FROM app_settings active
-                     JOIN likes l ON l.profile_id = active.value
-                     JOIN tweets t ON t.id = l.tweet_id
-                     LEFT JOIN users u ON u.id = t.author_id ";
-        let count_sql = format!("SELECT COUNT(DISTINCT t.id){from}{where_sql}");
+        let in_playlist = request.playlist_id.is_some();
+        let from = format!(
+            " FROM app_settings active
+              JOIN likes l ON l.profile_id = active.value
+              JOIN tweets t ON t.id = l.tweet_id
+              LEFT JOIN users u ON u.id = t.author_id {}",
+            if in_playlist {
+                "JOIN playlist_items pi ON pi.tweet_id = t.id
+                 JOIN playlists p ON p.id = pi.playlist_id AND p.profile_id = active.value "
+            } else {
+                ""
+            }
+        );
+        let count_sql = format!("SELECT COUNT(*){from}{where_sql}");
         let total: i64 = connection
             .query_row(&count_sql, params_from_iter(values.iter()), |row| {
                 row.get(0)
@@ -408,12 +419,22 @@ impl Database {
             "oldest" => "ASC",
             value => return Err(format!("Unsupported sort order: {value}")),
         };
+        // Playlists keep their curated order: explicit positions first, then insertion order.
+        let (note_column, order_by) = if in_playlist {
+            (
+                "pi.note",
+                "pi.position IS NULL, pi.position, pi.rowid".to_string(),
+            )
+        } else {
+            ("NULL", format!("CAST(t.id AS INTEGER) {chronology}"))
+        };
         let select_sql = format!(
-            "SELECT DISTINCT t.id, t.text, l.archive_text, t.created_at, l.liked_at,
+            "SELECT t.id, t.text, l.archive_text, t.created_at, l.liked_at,
                     t.canonical_url, t.enrichment_status, t.enrichment_error,
-                    u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path
+                    u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path,
+                    {note_column}
              {from}{where_sql}
-             ORDER BY CAST(t.id AS INTEGER) {chronology}
+             ORDER BY {order_by}
              LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
@@ -441,7 +462,8 @@ impl Database {
             .prepare(
                 "SELECT t.id, t.text, l.archive_text, t.created_at, l.liked_at,
                     t.canonical_url, t.enrichment_status, t.enrichment_error,
-                    u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path
+                    u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path,
+                    NULL
              FROM app_settings active
              JOIN likes l ON l.profile_id = active.value
              JOIN tweets t ON t.id = l.tweet_id
@@ -470,6 +492,120 @@ impl Database {
             .ok_or_else(|| format!("Tweet {id} was not found"))
     }
 
+    pub fn get_playlists(&self) -> Result<Vec<Playlist>, String> {
+        let connection = self.connect()?;
+        let mut statement = connection
+            .prepare(&format!(
+                "{PLAYLIST_SELECT}
+                 JOIN app_settings active ON active.key = 'active_profile_id' AND active.value = p.profile_id
+                 ORDER BY LOWER(p.name), p.id"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([], map_playlist)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn create_playlist(&self, name: &str, description: &str) -> Result<Playlist, String> {
+        let name = playlist_name(name)?;
+        let connection = self.connect()?;
+        let profile_id = active_profile_id(&connection)?;
+        connection
+            .execute(
+                "INSERT INTO playlists(profile_id, name, description) VALUES (?1, ?2, ?3)",
+                params![profile_id, name, description.trim()],
+            )
+            .map_err(|e| playlist_write_error(e, name))?;
+        playlist_by_id(&connection, connection.last_insert_rowid())
+    }
+
+    pub fn update_playlist(
+        &self,
+        id: i64,
+        name: &str,
+        description: &str,
+    ) -> Result<Playlist, String> {
+        let name = playlist_name(name)?;
+        let connection = self.connect()?;
+        let profile_id = active_profile_id(&connection)?;
+        let changed = connection
+            .execute(
+                "UPDATE playlists
+                 SET name = ?3, description = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 WHERE id = ?1 AND profile_id = ?2",
+                params![id, profile_id, name, description.trim()],
+            )
+            .map_err(|e| playlist_write_error(e, name))?;
+        if changed == 0 {
+            return Err(format!("Playlist {id} was not found"));
+        }
+        playlist_by_id(&connection, id)
+    }
+
+    pub fn delete_playlist(&self, id: i64) -> Result<(), String> {
+        let connection = self.connect()?;
+        let profile_id = active_profile_id(&connection)?;
+        let changed = connection
+            .execute(
+                "DELETE FROM playlists WHERE id = ?1 AND profile_id = ?2",
+                params![id, profile_id],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            Err(format!("Playlist {id} was not found"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn set_playlist_membership(
+        &self,
+        playlist_id: i64,
+        tweet_id: &str,
+        included: bool,
+    ) -> Result<Playlist, String> {
+        let connection = self.connect()?;
+        let profile_id = active_profile_id(&connection)?;
+        let owned: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM playlists WHERE id = ?1 AND profile_id = ?2)",
+                params![playlist_id, profile_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !owned {
+            return Err(format!("Playlist {playlist_id} was not found"));
+        }
+        if included {
+            let liked: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM likes WHERE profile_id = ?1 AND tweet_id = ?2)",
+                    params![profile_id, tweet_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if !liked {
+                return Err(format!("Tweet {tweet_id} was not found"));
+            }
+            connection
+                .execute(
+                    "INSERT OR IGNORE INTO playlist_items(playlist_id, tweet_id) VALUES (?1, ?2)",
+                    params![playlist_id, tweet_id],
+                )
+                .map_err(|e| e.to_string())?;
+        } else {
+            connection
+                .execute(
+                    "DELETE FROM playlist_items WHERE playlist_id = ?1 AND tweet_id = ?2",
+                    params![playlist_id, tweet_id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        playlist_by_id(&connection, playlist_id)
+    }
+
     pub fn video_source(&self, media_id: &str) -> Result<(String, Option<String>), String> {
         let connection = self.connect()?;
         connection
@@ -484,6 +620,65 @@ impl Database {
             .optional()
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Video media {media_id} was not found"))
+    }
+}
+
+// Counts only items the owning profile has liked, matching what the playlist feed shows.
+const PLAYLIST_SELECT: &str = "SELECT p.id, p.name, p.description, p.updated_at,
+        (SELECT COUNT(*) FROM playlist_items pi
+         JOIN likes l ON l.tweet_id = pi.tweet_id AND l.profile_id = p.profile_id
+         WHERE pi.playlist_id = p.id)
+     FROM playlists p";
+
+fn map_playlist(row: &rusqlite::Row<'_>) -> rusqlite::Result<Playlist> {
+    let count: i64 = row.get(4)?;
+    Ok(Playlist {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        updated_at: row.get(3)?,
+        item_count: count.max(0) as u64,
+    })
+}
+
+fn playlist_by_id(connection: &Connection, id: i64) -> Result<Playlist, String> {
+    connection
+        .query_row(
+            &format!("{PLAYLIST_SELECT} WHERE p.id = ?1"),
+            [id],
+            map_playlist,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Playlist {id} was not found"))
+}
+
+fn active_profile_id(connection: &Connection) -> Result<String, String> {
+    connection
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'active_profile_id'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Import an archive before creating playlists".to_string())
+}
+
+fn playlist_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        Err("Playlist name cannot be empty".into())
+    } else {
+        Ok(name)
+    }
+}
+
+fn playlist_write_error(error: rusqlite::Error, name: &str) -> String {
+    if error.to_string().contains("UNIQUE constraint failed") {
+        format!("A playlist named “{name}” already exists")
+    } else {
+        error.to_string()
     }
 }
 
@@ -603,6 +798,10 @@ fn build_filters(request: &TweetQuery) -> Result<(String, Vec<Value>, bool), Str
         clauses.push("t.enrichment_status = ?".into());
         values.push(Value::Text(value));
     }
+    if let Some(playlist_id) = request.playlist_id {
+        clauses.push("pi.playlist_id = ?".into());
+        values.push(Value::Integer(playlist_id));
+    }
     clauses.insert(0, "active.key = 'active_profile_id'".into());
     let sql = format!(" WHERE {}", clauses.join(" AND "));
     Ok((sql, values, use_fts))
@@ -636,6 +835,8 @@ fn map_tweet_base(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tweet> {
         }),
         media: Vec::new(),
         quote: None,
+        playlist_ids: Vec::new(),
+        playlist_note: row.get(13)?,
     })
 }
 
@@ -666,6 +867,21 @@ fn hydrate(connection: &Connection, mut tweet: Tweet) -> Result<Tweet, String> {
         [&tweet.id],
         |row| Ok(Quote { id: row.get::<_, Option<String>>(0)?.unwrap_or_default(), text: row.get(1)?, canonical_url: row.get(2)?, author_name: row.get(3)?, username: row.get(4)? })
     ).optional().map_err(|e| e.to_string())?;
+    let mut playlist_statement = connection
+        .prepare(
+            "SELECT pi.playlist_id
+             FROM playlist_items pi
+             JOIN playlists p ON p.id = pi.playlist_id
+             JOIN app_settings active ON active.key = 'active_profile_id' AND active.value = p.profile_id
+             WHERE pi.tweet_id = ?1
+             ORDER BY pi.playlist_id",
+        )
+        .map_err(|e| e.to_string())?;
+    tweet.playlist_ids = playlist_statement
+        .query_map([&tweet.id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(|e| e.to_string())?;
     Ok(tweet)
 }
 
@@ -978,6 +1194,105 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM likes", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
             4
+        );
+    }
+
+    #[test]
+    fn playlists_keep_curated_order_and_stay_per_profile() {
+        let (_temp, db) = database();
+        let likes = |ids: &[&str]| -> Vec<SparseLike> {
+            ids.iter()
+                .map(|id| SparseLike {
+                    id: (*id).into(),
+                    text: Some(format!("Post {id}")),
+                    canonical_url: format!("https://x.com/i/web/status/{id}"),
+                    liked_at: None,
+                })
+                .collect()
+        };
+        db.import_archive(
+            &ParsedArchive {
+                profile: profile("10"),
+                likes: likes(&["11111", "22222", "33333"]),
+                failed: 0,
+            },
+            Path::new("first"),
+        )
+        .unwrap();
+        db.set_active_profile("10").unwrap();
+
+        let playlist = db.create_playlist("  Rust  ", "Learning").unwrap();
+        assert_eq!(playlist.name, "Rust");
+        assert!(db.create_playlist("rust", "").is_err());
+        assert!(db.create_playlist("   ", "").is_err());
+        for id in ["33333", "11111", "22222"] {
+            db.set_playlist_membership(playlist.id, id, true).unwrap();
+        }
+        // An agent-assigned position wins over insertion order.
+        db.connect()
+            .unwrap()
+            .execute(
+                "UPDATE playlist_items SET position = 1, note = 'start here' WHERE tweet_id = '22222'",
+                [],
+            )
+            .unwrap();
+
+        let page = db
+            .get_tweets(TweetQuery {
+                playlist_id: Some(playlist.id),
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(page.total, 3);
+        assert_eq!(
+            page.items.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["22222", "33333", "11111"]
+        );
+        assert_eq!(page.items[0].playlist_note.as_deref(), Some("start here"));
+        assert_eq!(page.items[0].playlist_ids, [playlist.id]);
+        assert!(db.get_tweet("33333").unwrap().playlist_note.is_none());
+
+        let updated = db
+            .set_playlist_membership(playlist.id, "33333", false)
+            .unwrap();
+        assert_eq!(updated.item_count, 2);
+        assert!(db.get_tweet("33333").unwrap().playlist_ids.is_empty());
+
+        db.import_archive(
+            &ParsedArchive {
+                profile: profile("20"),
+                likes: likes(&["44444"]),
+                failed: 0,
+            },
+            Path::new("second"),
+        )
+        .unwrap();
+        assert!(db.get_playlists().unwrap().is_empty());
+        assert!(db
+            .set_playlist_membership(playlist.id, "44444", true)
+            .is_err());
+        let foreign = db
+            .get_tweets(TweetQuery {
+                playlist_id: Some(playlist.id),
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(foreign.total, 0);
+
+        db.set_active_profile("10").unwrap();
+        let renamed = db.update_playlist(playlist.id, "Rust basics", "").unwrap();
+        assert_eq!(renamed.name, "Rust basics");
+        db.delete_playlist(playlist.id).unwrap();
+        assert!(db.get_playlists().unwrap().is_empty());
+        assert_eq!(
+            db.connect()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM playlist_items", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

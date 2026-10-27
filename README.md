@@ -14,6 +14,7 @@ Built with Tauri 2, Svelte 5, TypeScript, Rust, and SQLite (FTS5).
 - **Feed** with newest-first / oldest-first ordering, a zoomable image viewer, and in-app video playback (or open the video in `mpv` if installed).
 - **Full-text search** across post text and authors.
 - **Filters** by author, media type, date range, and enrichment status.
+- **Playlists** — group liked posts by topic, in your own order. Add posts from the feed, or let an agent build them (see below).
 - **Profiles** — import archives from more than one account and switch between them.
 - **Open original** to jump to the post on X.
 
@@ -45,6 +46,44 @@ On X: **Settings → Your account → Download an archive of your data**. When i
 Everything lives in the app's data directory (`~/.local/share/dev.local.xknowledgebase/` on Linux): `knowledge.db` (SQLite) with the normalized posts, the raw enrichment JSON for each one, and a `media/` folder with cached images, thumbnails, and avatars. Your archive files are only read, never modified.
 
 Archive exports (`twitter-*/`, `twitter-*.zip`) and local databases are gitignored, so keeping them inside the project folder is safe.
+
+## Building playlists with an agent
+
+Playlists are plain SQLite tables in `knowledge.db`, so an agent can search your likes and create playlists directly. Changes show up the next time the app window gets focus.
+
+```sql
+-- playlists: one per topic, owned by a profile; names are unique per profile (case-insensitive)
+playlists(id INTEGER PRIMARY KEY, profile_id TEXT, name TEXT, description TEXT DEFAULT '',
+          created_at TEXT, updated_at TEXT)
+-- playlist_items: posts in a playlist; sorted by position (NULLs last), then by insertion order
+playlist_items(playlist_id INTEGER, tweet_id TEXT, position INTEGER, note TEXT, added_at TEXT,
+               PRIMARY KEY (playlist_id, tweet_id))
+```
+
+`created_at`, `updated_at` and `added_at` have defaults, and `note` is shown on the post inside the playlist. Run `PRAGMA foreign_keys = ON;` first so deleting a playlist removes its items.
+
+```sql
+-- Which profile? (the app shows the one in app_settings.active_profile_id)
+SELECT id, username FROM profiles;
+
+-- Search one profile's likes: enriched text and authors, archive text, and quoted posts
+SELECT t.id, u.username, t.created_at, substr(t.text, 1, 280) AS text
+FROM likes l
+JOIN tweets t ON t.id = l.tweet_id
+LEFT JOIN users u ON u.id = t.author_id
+WHERE l.profile_id = '<profile id>'
+  AND (t.rowid IN (SELECT rowid FROM tweet_fts WHERE tweet_fts MATCH 'rust OR cargo')
+       OR l.rowid IN (SELECT rowid FROM like_fts WHERE like_fts MATCH 'rust OR cargo')
+       OR t.id IN (SELECT tweet_id FROM quotes WHERE quotes.text LIKE '%rust%'));
+
+-- Create a playlist and add the posts you picked
+INSERT INTO playlists(profile_id, name, description)
+VALUES ('<profile id>', 'Rust', 'Learning Rust and its tooling') RETURNING id;
+INSERT OR IGNORE INTO playlist_items(playlist_id, tweet_id, position, note)
+VALUES (<playlist id>, '<tweet id>', 1, 'Best intro thread');
+```
+
+Only posts the profile has liked appear in its playlists. The database is the source of truth, so keep backups before bulk edits.
 
 ## Project layout
 
