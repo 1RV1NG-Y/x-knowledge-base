@@ -44,6 +44,19 @@ pub fn run() {
             let queue = EnrichmentQueue::start(db.clone(), cache, client.clone(), concurrency);
             queue.enqueue(pending);
             app.manage(Arc::new(Backend { db, queue, client }));
+
+            // WebKitGTK eases every wheel tick over a long animation, which makes the
+            // feed lag behind the wheel. Scroll directly instead; touchpads keep their
+            // precise deltas and kinetic momentum.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                window.with_webview(|webview| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_enable_smooth_scrolling(false);
+                    }
+                })?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

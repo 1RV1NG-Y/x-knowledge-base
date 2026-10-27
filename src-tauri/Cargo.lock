@@ -5381,6 +5381,7 @@ dependencies = [
  "tokio",
  "url",
  "walkdir",
+ "webkit2gtk",
  "zip",
 ]
 
