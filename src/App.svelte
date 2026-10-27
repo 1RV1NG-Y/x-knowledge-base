@@ -385,6 +385,19 @@
   });
 </script>
 
+{#snippet sortButton()}
+  <button
+    class="sort-button"
+    type="button"
+    aria-label={sortOrder === 'newest' ? 'Show oldest posts first' : 'Show newest posts first'}
+    title="Sort by post chronology"
+    onclick={toggleSortOrder}
+  >
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 7h10M8 12h7M8 17h4M4 5v14m0 0-2.5-2.5M4 19l2.5-2.5" /></svg>
+    {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
+  </button>
+{/snippet}
+
 <svelte:head><title>X Archive — Local likes browser</title></svelte:head>
 
 <div class="app-shell">
@@ -449,21 +462,13 @@
               <button class="sort-button danger" type="button" onclick={() => void removePlaylist()}>Delete</button>
               <button class="sort-button" type="button" onclick={() => confirmingDelete = false}>Cancel</button>
             {:else}
+              {@render sortButton()}
               <button class="sort-button" type="button" onclick={startEditingPlaylist}>Edit</button>
               <button class="sort-button" type="button" onclick={() => { confirmingDelete = true; editingPlaylist = false; }}>Delete</button>
             {/if}
           </div>
         {:else}
-        <button
-          class="sort-button"
-          type="button"
-          aria-label={sortOrder === 'newest' ? 'Show oldest posts first' : 'Show newest posts first'}
-          title="Sort by post chronology"
-          onclick={toggleSortOrder}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 7h10M8 12h7M8 17h4M4 5v14m0 0-2.5-2.5M4 19l2.5-2.5" /></svg>
-          {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
-        </button>
+          {@render sortButton()}
         {/if}
       </div>
 

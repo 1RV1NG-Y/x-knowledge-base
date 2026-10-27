@@ -26,6 +26,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
     ),
     (4, include_str!("../../migrations/0004_profiles.sql")),
     (5, include_str!("../../migrations/0005_playlists.sql")),
+    (
+        6,
+        include_str!("../../migrations/0006_playlist_items_unordered.sql"),
+    ),
 ];
 
 #[derive(Debug, Clone)]
@@ -419,22 +423,14 @@ impl Database {
             "oldest" => "ASC",
             value => return Err(format!("Unsupported sort order: {value}")),
         };
-        // Playlists keep their curated order: explicit positions first, then insertion order.
-        let (note_column, order_by) = if in_playlist {
-            (
-                "pi.note",
-                "pi.position IS NULL, pi.position, pi.rowid".to_string(),
-            )
-        } else {
-            ("NULL", format!("CAST(t.id AS INTEGER) {chronology}"))
-        };
+        let note_column = if in_playlist { "pi.note" } else { "NULL" };
         let select_sql = format!(
             "SELECT t.id, t.text, l.archive_text, t.created_at, l.liked_at,
                     t.canonical_url, t.enrichment_status, t.enrichment_error,
                     u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path,
                     {note_column}
              {from}{where_sql}
-             ORDER BY {order_by}
+             ORDER BY CAST(t.id AS INTEGER) {chronology}
              LIMIT ? OFFSET ?"
         );
         let mut page_values = values;
@@ -1198,7 +1194,7 @@ mod tests {
     }
 
     #[test]
-    fn playlists_keep_curated_order_and_stay_per_profile() {
+    fn playlists_sort_by_date_and_stay_per_profile() {
         let (_temp, db) = database();
         let likes = |ids: &[&str]| -> Vec<SparseLike> {
             ids.iter()
@@ -1228,11 +1224,10 @@ mod tests {
         for id in ["33333", "11111", "22222"] {
             db.set_playlist_membership(playlist.id, id, true).unwrap();
         }
-        // An agent-assigned position wins over insertion order.
         db.connect()
             .unwrap()
             .execute(
-                "UPDATE playlist_items SET position = 1, note = 'start here' WHERE tweet_id = '22222'",
+                "UPDATE playlist_items SET note = 'good intro' WHERE tweet_id = '33333'",
                 [],
             )
             .unwrap();
@@ -1247,9 +1242,25 @@ mod tests {
         assert_eq!(page.total, 3);
         assert_eq!(
             page.items.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
-            ["22222", "33333", "11111"]
+            ["33333", "22222", "11111"]
         );
-        assert_eq!(page.items[0].playlist_note.as_deref(), Some("start here"));
+        assert_eq!(page.items[0].playlist_note.as_deref(), Some("good intro"));
+        let oldest = db
+            .get_tweets(TweetQuery {
+                playlist_id: Some(playlist.id),
+                sort_order: Some("oldest".into()),
+                limit: 20,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            oldest
+                .items
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            ["11111", "22222", "33333"]
+        );
         assert_eq!(page.items[0].playlist_ids, [playlist.id]);
         assert!(db.get_tweet("33333").unwrap().playlist_note.is_none());
 

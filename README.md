@@ -14,7 +14,7 @@ Built with Tauri 2, Svelte 5, TypeScript, Rust, and SQLite (FTS5).
 - **Feed** with newest-first / oldest-first ordering, a zoomable image viewer, and in-app video playback (or open the video in `mpv` if installed).
 - **Full-text search** across post text and authors.
 - **Filters** by author, media type, date range, and enrichment status.
-- **Playlists** — group liked posts by topic, in your own order. Add posts from the feed, or let an agent build them (see below).
+- **Playlists** — group liked posts by topic. Add posts from the feed, or let an agent build them (see below).
 - **Profiles** — import archives from more than one account and switch between them.
 - **Open original** to jump to the post on X.
 
@@ -55,8 +55,8 @@ Playlists are plain SQLite tables in `knowledge.db`, so an agent can search your
 -- playlists: one per topic, owned by a profile; names are unique per profile (case-insensitive)
 playlists(id INTEGER PRIMARY KEY, profile_id TEXT, name TEXT, description TEXT DEFAULT '',
           created_at TEXT, updated_at TEXT)
--- playlist_items: posts in a playlist; sorted by position (NULLs last), then by insertion order
-playlist_items(playlist_id INTEGER, tweet_id TEXT, position INTEGER, note TEXT, added_at TEXT,
+-- playlist_items: posts in a playlist, shown newest or oldest first like the main feed
+playlist_items(playlist_id INTEGER, tweet_id TEXT, note TEXT, added_at TEXT,
                PRIMARY KEY (playlist_id, tweet_id))
 ```
 
@@ -79,8 +79,8 @@ WHERE l.profile_id = '<profile id>'
 -- Create a playlist and add the posts you picked
 INSERT INTO playlists(profile_id, name, description)
 VALUES ('<profile id>', 'Rust', 'Learning Rust and its tooling') RETURNING id;
-INSERT OR IGNORE INTO playlist_items(playlist_id, tweet_id, position, note)
-VALUES (<playlist id>, '<tweet id>', 1, 'Best intro thread');
+INSERT OR IGNORE INTO playlist_items(playlist_id, tweet_id, note)
+VALUES (<playlist id>, '<tweet id>', 'Best intro thread');
 ```
 
 Only posts the profile has liked appear in its playlists. The database is the source of truth, so keep backups before bulk edits.

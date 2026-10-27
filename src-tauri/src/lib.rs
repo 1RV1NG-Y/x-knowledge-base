@@ -19,6 +19,15 @@ pub struct Backend {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[allow(unused_mut)]
+    let mut context = tauri::generate_context!();
+    // A shared GTK app ID makes a second launch hand off to the running instance and exit,
+    // so dev builds skip it and can run alongside the installed app.
+    #[cfg(debug_assertions)]
+    {
+        context.config_mut().app.enable_gtk_app_id = false;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -76,6 +85,6 @@ pub fn run() {
             commands::play_video_mpv,
             commands::open_original,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running X Knowledge Base");
 }
