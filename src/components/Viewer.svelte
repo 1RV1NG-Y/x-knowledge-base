@@ -101,7 +101,7 @@
 
 <style>
   .viewer { position: fixed; inset: var(--titlebar) 0 0; z-index: 60; background: rgb(0 0 0 / 0.92); color: #fff; animation: fade 140ms ease; }
-  .stage { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; cursor: zoom-in; }
+  .stage { position: absolute; inset: 0; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; overflow: hidden; cursor: zoom-in; }
   .stage.zoomed { cursor: grab; }
   img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
   img.animate { transition: transform 160ms ease; }
