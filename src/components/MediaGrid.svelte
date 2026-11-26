@@ -6,9 +6,6 @@
   import { fileUrl, loadVideo, playVideoInMpv } from '../api';
   import { desk, message } from '../state.svelte';
 
-  // Photos open the viewer. Videos play right here (downloaded by the Rust side, or
-  // streamed from X if that copy won't play) or in mpv; a video that can't play here goes
-  // back to its preview with the reason, so mpv is always one click away.
   let { media }: { media: Media[] } = $props();
 
   const items = $derived(media.slice(0, 4));
@@ -41,22 +38,23 @@
     desk.viewer = { media: images, index: Math.max(0, images.indexOf(item)) };
   }
 
-  async function playHere(event: MouseEvent, item: Media) {
+  let alive = true;
+
+  function playHere(event: MouseEvent, item: Media) {
     stop(event);
-    if (busy[item.id]) return;
-    busy = { ...busy, [item.id]: 'here' };
+    if (!item.remoteUrl || busy[item.id]) return;
     problems = { ...problems, [item.id]: '' };
+    playing = { ...playing, [item.id]: { src: item.remoteUrl, blob: false } };
+  }
+
+  async function toggleFullscreen(event: MouseEvent, item: Media) {
+    stop(event);
+    const player = (event.currentTarget as HTMLElement).closest('.cell');
     try {
-      const bytes = await loadVideo(item.id);
-      if (bytes.byteLength === 0) throw new Error('The video came back empty.');
-      playing = { ...playing, [item.id]: { src: URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' })), blob: true } };
+      if (document.fullscreenElement === player) await document.exitFullscreen();
+      else await player?.requestFullscreen();
     } catch (cause) {
-      // Couldn't download it (too big, network): try streaming it straight from X.
-      if (item.remoteUrl) playing = { ...playing, [item.id]: { src: item.remoteUrl, blob: false } };
-      else problems = { ...problems, [item.id]: `Couldn’t load the video: ${message(cause)}` };
-    } finally {
-      const { [item.id]: _, ...rest } = busy;
-      busy = rest;
+      problems = { ...problems, [item.id]: `Couldn’t enter fullscreen: ${message(cause)}` };
     }
   }
 
@@ -82,19 +80,35 @@
     playing = rest;
   }
 
-  // The player couldn't decode or load it.
-  function failedToPlay(item: Media) {
+  async function failedToPlay(item: Media) {
     const current = playing[item.id];
-    if (current?.blob && item.remoteUrl && item.remoteUrl !== current.src) {
-      URL.revokeObjectURL(current.src);
-      playing = { ...playing, [item.id]: { src: item.remoteUrl, blob: false } };
+    if (!current || busy[item.id]) return;
+    stopPlaying(item.id);
+    if (current.blob) {
+      problems = { ...problems, [item.id]: 'This video won’t play here. Try mpv.' };
       return;
     }
-    stopPlaying(item.id);
-    problems = { ...problems, [item.id]: 'This video won’t play here. Try mpv.' };
+
+    // Some streams cannot be decoded directly. Retry the compatible MP4 via Rust.
+    busy = { ...busy, [item.id]: 'here' };
+    try {
+      const bytes = await loadVideo(item.id);
+      if (!alive) return;
+      if (!bytes.byteLength) throw new Error('The video came back empty.');
+      const src = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
+      playing = { ...playing, [item.id]: { src, blob: true } };
+    } catch (cause) {
+      problems = { ...problems, [item.id]: `Couldn’t load the video: ${message(cause)}` };
+    } finally {
+      const { [item.id]: _, ...rest } = busy;
+      busy = rest;
+    }
   }
 
-  onDestroy(() => Object.values(playing).forEach((p) => p.blob && URL.revokeObjectURL(p.src)));
+  onDestroy(() => {
+    alive = false;
+    Object.values(playing).forEach((p) => p.blob && URL.revokeObjectURL(p.src));
+  });
 </script>
 
 {#if items.length}
@@ -109,11 +123,15 @@
             src={playing[item.id]?.src}
             poster={source(item)}
             controls
+            controlslist="nofullscreen"
             autoplay
             playsinline
             onclick={stop}
             onerror={() => failedToPlay(item)}
           ></video>
+          <button type="button" class="fullscreen" onclick={(e) => void toggleFullscreen(e, item)}>
+            <span class="enter">Fullscreen</span><span class="leave">Exit fullscreen</span>
+          </button>
           <button type="button" class="mpv top" title="Play in mpv" disabled={Boolean(busy[item.id])} onclick={(e) => { stopPlaying(item.id); void playInMpv(e, item); }}>
             {busy[item.id] === 'mpv' ? 'Opening…' : 'mpv'}
           </button>
@@ -191,10 +209,13 @@
     transition: transform 120ms ease;
   }
   .play:hover { transform: scale(1.06); }
-  .mpv {
+  .cell:fullscreen { width: 100%; height: 100%; background: black; }
+  video::-webkit-media-controls-fullscreen-button { display: none; }
+  .fullscreen { left: 10px; top: 10px; bottom: auto; right: auto; }
+  .leave, .cell:fullscreen .enter { display: none; }
+  .cell:fullscreen .leave { display: inline; }
+  .mpv, .fullscreen {
     position: absolute;
-    right: 10px;
-    bottom: 10px;
     padding: 2px 8px;
     border-radius: 9999px;
     font-size: 13px;
@@ -202,7 +223,8 @@
     color: #fff;
     background: rgb(0 0 0 / 0.77);
   }
-  .mpv:hover { background: rgb(0 0 0 / 0.9); }
+  .mpv { right: 10px; bottom: 10px; }
+  .fullscreen:hover, .mpv:hover { background: rgb(0 0 0 / 0.9); }
   .mpv.top { bottom: auto; top: 10px; }
   .badge {
     position: absolute;

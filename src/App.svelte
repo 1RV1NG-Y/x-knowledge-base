@@ -63,6 +63,7 @@
     const typing = (target: EventTarget | null) =>
       target instanceof HTMLElement && Boolean(target.closest('input, textarea, select, [contenteditable]'));
     const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && document.fullscreenElement) return;
       if (event.key === 'Escape' && !typing(event.target)) {
         if (desk.back()) event.preventDefault();
       } else if (event.key === 'ArrowLeft' && event.altKey) {
