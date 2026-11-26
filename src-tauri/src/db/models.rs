@@ -91,6 +91,8 @@ pub struct TweetQuery {
     pub after: Option<String>,
     pub status: Option<String>,
     pub sort_order: Option<String>,
+    /// Shuffle seed for `sort_order: "random"`.
+    pub seed: Option<i64>,
     #[serde(default)]
     pub offset: u32,
     #[serde(default = "default_limit")]

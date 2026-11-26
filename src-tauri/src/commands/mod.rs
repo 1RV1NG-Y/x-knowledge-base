@@ -1,3 +1,5 @@
+pub mod sync;
+
 use std::{path::PathBuf, process::Stdio, sync::Arc};
 
 use tauri::{AppHandle, State};
@@ -12,7 +14,7 @@ use crate::{
 const MAX_VIDEO_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_EMBEDDED_VIDEO_BITRATE: u64 = 2_500_000;
 
-fn embedded_video_url(media_id: &str, fallback: &str, raw_json: Option<&str>) -> String {
+pub(crate) fn embedded_video_url(media_id: &str, fallback: &str, raw_json: Option<&str>) -> String {
     let Some(raw_json) = raw_json else {
         return fallback.into();
     };

@@ -52,7 +52,7 @@ export interface Playlist {
   updatedAt: string;
 }
 
-export type SortOrder = 'newest' | 'oldest';
+export type SortOrder = 'newest' | 'oldest' | 'random';
 
 export interface TweetQuery {
   playlistId?: number;
@@ -63,6 +63,8 @@ export interface TweetQuery {
   after?: string;
   status?: string;
   sortOrder: SortOrder;
+  /** Shuffle seed for sortOrder 'random'. */
+  seed?: number;
   offset: number;
   limit: number;
 }
@@ -107,4 +109,46 @@ export interface Filters {
   after: string;
   before: string;
   status: string;
+}
+
+export interface SyncDevice {
+  id: string;
+  name: string;
+  platform: string;
+  connected: boolean;
+  pairedAt: string;
+  lastSync?: string;
+}
+
+export interface SyncProgress {
+  phase: 'idle' | 'connecting' | 'checking' | 'downloading' | 'applying' | 'upToDate' | 'error';
+  message: string;
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+  lastSync?: string;
+  lastError?: string;
+  posts?: number;
+}
+
+export interface SyncStatus {
+  deviceId: string;
+  deviceName: string;
+  role: 'pc' | 'phone';
+  port?: number;
+  devices: SyncDevice[];
+  progress?: SyncProgress;
+}
+
+export interface SyncInfo {
+  phone: boolean;
+  status?: SyncStatus;
+  error?: string;
+}
+
+export interface SyncInvite {
+  ticket: string;
+  qrSvg: string;
+  expiresAt: string;
 }

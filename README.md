@@ -11,12 +11,49 @@ Built with Tauri 2, Svelte 5, TypeScript, Rust, and SQLite (FTS5).
 - **Import** an archive ZIP or an extracted archive folder. The app finds `data/like.js` (and your account/profile info) and recovers post IDs and URLs. Re-importing updates in place without duplicates.
 - **Enrichment** fetches author name, handle, avatar, full text, images, videos, and quoted posts in the background, with bounded concurrency and backoff on rate limits. Deleted, protected, or unavailable posts are marked rather than dropped, and failed ones can be retried.
 - **Local media cache** for images, thumbnails, and avatars, stored as normal files.
-- **Feed** with newest-first / oldest-first ordering, a zoomable image viewer, and in-app video playback (or open the video in `mpv` if installed).
-- **Full-text search** across post text and authors.
-- **Filters** by author, media type, date range, and enrichment status.
-- **Playlists** — group liked posts by topic. Add posts from the feed, or let an agent build them (see below).
-- **Profiles** — import archives from more than one account and switch between them.
-- **Open original** to jump to the post on X.
+- **Laid out like X**: navigation on the left, the feed in the middle, search, your library and lists on the right. The app draws its own title bar; the window still moves, snaps and resizes like any other.
+- **Feed** with two tabs: **For you** (your likes shuffled; click the tab or the shuffle button for a new order) and **Latest** (newest or oldest first, with filters by media type, date range, author and enrichment status). A zoomable image viewer, and in-app video playback (or open the video in `mpv` if installed).
+- **Full-text search** across post text and authors; `from:username` narrows to one account.
+- **Profiles of the people you like**: click an avatar or name to see every liked post from that account.
+- **Post pages** with the dates, the lists it's in, its enrichment status and the text from your archive.
+- **Lists** (playlists): group liked posts by topic. Save posts with the bookmark button, or let an agent build lists (see below).
+- **Accounts**: import archives from more than one account and switch between them.
+- **Open on X** to jump to the original post.
+- Keyboard: `Esc` (or the mouse's back button) goes back, `/` searches.
+
+## Phone app (Android)
+
+A read-only copy of the library for your phone, laid out like the X mobile app: **For you**
+(your likes in a random order, reshuffled on each launch or with the shuffle button),
+**Latest**, search (`from:username` narrows to one author), lists, a post page, and a zoomable
+image viewer. Videos stream from X, so they need an internet connection; everything else works
+offline.
+
+**Sync is one-way, PC → phone**, over your local network, with no account or server (the same
+approach as reader-sync and music-stream: QUIC via [iroh](https://github.com/n0-computer/iroh),
+mDNS discovery, pairing by QR code). The PC stays the source of truth; nothing on the phone is
+sent back.
+
+1. On the PC, click **Phone** in the left column, then **Pair a phone**. It shows a QR code and a text code (single use,
+   10 minutes).
+2. On the phone, open the app's **Sync** tab and scan the code (or paste the text code).
+3. The phone downloads a slimmed copy of the database (no raw enrichment JSON) plus the cached
+   images and avatars, then keeps itself up to date whenever the desktop app is open and both
+   are on the same Wi-Fi: when the app comes to the foreground, on **Sync now**, and every few
+   minutes while connected. Only changed files are fetched; interrupted downloads resume.
+
+The devices talk over UDP port **47130** and mDNS (UDP 5353). Allow them in your firewall, e.g.
+`sudo ufw allow from 192.168.1.0/24 to any port 47130 proto udp`.
+
+Build and install (Android SDK + NDK, Java 21; the APK is signed with your local debug key):
+
+```sh
+npm run android:build                                  # → android-dist/x-knowledge-base.apk
+adb install -r android-dist/x-knowledge-base.apk
+```
+
+`npm run dev:mobile` serves the phone UI in a browser; run `node scripts/mobile-fixtures.mjs`
+first to give it a sample of your library to show (written to the gitignored `mobile/.dev/`).
 
 ## Requirements
 
@@ -30,6 +67,8 @@ Built with Tauri 2, Svelte 5, TypeScript, Rust, and SQLite (FTS5).
 npm install
 npm run tauri dev
 ```
+
+`npm run dev` serves the desktop UI in a browser too, answering from the same sample fixtures as the phone preview (`node scripts/mobile-fixtures.mjs`).
 
 Build a release bundle with:
 
@@ -88,7 +127,9 @@ Only posts the profile has liked appear in its playlists. The database is the so
 ## Project layout
 
 ```
-src/                    Svelte UI (feed, search, filters, profile switcher)
+src/                    Svelte UI of the desktop app (shares components with mobile/)
+mobile/                 Svelte UI of the phone app (built into dist-mobile/ for Android)
+src-tauri/src/sync      PC → phone sync: pairing, snapshots, transfers
 src-tauri/src/archive   Archive parsing (ZIP or folder)
 src-tauri/src/enrichment  FxTwitter client and enrichment queue
 src-tauri/src/media     Local media cache

@@ -6,7 +6,10 @@ use std::{
 };
 
 use chrono::Utc;
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use rusqlite::{
+    functions::FunctionFlags, params, params_from_iter, types::Value, Connection,
+    OptionalExtension,
+};
 
 use crate::{
     archive::{self, ArchiveProfile, ParsedArchive},
@@ -37,16 +40,27 @@ pub struct Database {
     path: PathBuf,
 }
 
+/// The schema version a database ends up at: a phone refuses a snapshot from a newer app.
+pub const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
+
 impl Database {
     pub fn initialize(path: PathBuf) -> Result<Self, String> {
+        Self::initialize_with(path, true)
+    }
+
+    /// `wal: false` keeps the default rollback journal: the phone replaces its database file
+    /// with each snapshot, which must never leave a stale `-wal` file beside it.
+    pub fn initialize_with(path: PathBuf, wal: bool) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let db = Self { path };
         let mut connection = db.connect()?;
-        connection
-            .execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
-            .map_err(|e| e.to_string())?;
+        if wal {
+            connection
+                .execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+                .map_err(|e| e.to_string())?;
+        }
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);",
@@ -76,6 +90,10 @@ impl Database {
         Ok(db)
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     fn connect(&self) -> Result<Connection, String> {
         let connection = Connection::open(&self.path).map_err(|e| e.to_string())?;
         connection
@@ -84,6 +102,7 @@ impl Database {
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|e| e.to_string())?;
+        register_shuffle(&connection).map_err(|e| e.to_string())?;
         Ok(connection)
     }
 
@@ -418,9 +437,16 @@ impl Database {
 
         let limit = request.limit.clamp(1, 100) as i64;
         let offset = request.offset.min(1_000_000) as i64;
-        let chronology = match request.sort_order.as_deref().unwrap_or("newest") {
-            "newest" => "DESC",
-            "oldest" => "ASC",
+        let mut page_values = values;
+        // Random order is a shuffle fixed by the seed, so paging through it never repeats
+        // or skips a post; a new seed gives a new shuffle.
+        let order = match request.sort_order.as_deref().unwrap_or("newest") {
+            "newest" => "CAST(t.id AS INTEGER) DESC".to_string(),
+            "oldest" => "CAST(t.id AS INTEGER) ASC".to_string(),
+            "random" => {
+                page_values.push(Value::Integer(request.seed.unwrap_or(0)));
+                "kb_shuffle(t.id, ?), t.id".to_string()
+            }
             value => return Err(format!("Unsupported sort order: {value}")),
         };
         let note_column = if in_playlist { "pi.note" } else { "NULL" };
@@ -430,10 +456,9 @@ impl Database {
                     u.id, u.username, u.display_name, u.avatar_url, u.avatar_local_path,
                     {note_column}
              {from}{where_sql}
-             ORDER BY CAST(t.id AS INTEGER) {chronology}
+             ORDER BY {order}
              LIMIT ? OFFSET ?"
         );
-        let mut page_values = values;
         page_values.push(Value::Integer(limit));
         page_values.push(Value::Integer(offset));
         let mut statement = connection.prepare(&select_sql).map_err(|e| e.to_string())?;
@@ -617,6 +642,34 @@ impl Database {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Video media {media_id} was not found"))
     }
+}
+
+/// `kb_shuffle(id, seed)`: a stable pseudo-random sort key (SplitMix64 of the post id mixed
+/// with the seed).
+fn register_shuffle(connection: &Connection) -> rusqlite::Result<()> {
+    connection.create_scalar_function(
+        "kb_shuffle",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            let id: String = context.get(0)?;
+            let seed: i64 = context.get(1)?;
+            Ok(shuffle_key(&id, seed))
+        },
+    )
+}
+
+pub fn shuffle_key(id: &str, seed: i64) -> i64 {
+    let mut x = id
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        })
+        ^ (seed as u64);
+    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (x ^ (x >> 31)) as i64
 }
 
 // Counts only items the owning profile has liked, matching what the playlist feed shows.
@@ -1028,10 +1081,52 @@ mod tests {
         );
         assert!(db
             .get_tweets(TweetQuery {
-                sort_order: Some("random".into()),
+                sort_order: Some("sideways".into()),
                 ..Default::default()
             })
             .is_err());
+    }
+
+    #[test]
+    fn random_order_is_a_stable_shuffle_per_seed() {
+        let (_temp, db) = database();
+        let parsed = ParsedArchive {
+            profile: profile("1"),
+            likes: (0..40)
+                .map(|index| SparseLike {
+                    id: format!("{}", 1_000_000 + index),
+                    text: Some(format!("Post {index}")),
+                    canonical_url: format!("https://x.com/i/web/status/{index}"),
+                    liked_at: None,
+                })
+                .collect(),
+            failed: 0,
+        };
+        db.import_archive(&parsed, Path::new("archive")).unwrap();
+        let page = |seed: i64, offset: u32| {
+            db.get_tweets(TweetQuery {
+                sort_order: Some("random".into()),
+                seed: Some(seed),
+                offset,
+                limit: 15,
+                ..Default::default()
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|tweet| tweet.id)
+            .collect::<Vec<_>>()
+        };
+        let all: Vec<String> = [0, 15, 30].into_iter().flat_map(|offset| page(7, offset)).collect();
+        let mut sorted = all.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 40, "pages cover every post exactly once");
+        assert_eq!(page(7, 0), page(7, 0), "same seed, same order");
+        assert_ne!(page(7, 0), page(8, 0), "new seed, new order");
+        let mut newest = sorted.clone();
+        newest.reverse();
+        assert_ne!(all, newest);
     }
 
     #[test]

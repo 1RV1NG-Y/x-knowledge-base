@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "The phone app: reading the synced library, opening posts on X, scanning the PC's pairing code, and the Back button",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:app:allow-exit",
+    "opener:default",
+    "barcode-scanner:default"
+  ],
+  "platforms": [
+    "android",
+    "iOS"
+  ]
+}

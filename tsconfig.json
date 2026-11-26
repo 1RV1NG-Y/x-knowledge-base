@@ -14,7 +14,18 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["svelte", "node"]
+    "types": [
+      "svelte",
+      "node"
+    ]
   },
-  "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "mobile/src/**/*.ts",
+    "mobile/src/**/*.svelte",
+    "vite.config.ts",
+    "vite.mobile.config.ts"
+  ]
 }
