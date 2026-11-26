@@ -6,14 +6,15 @@
   import { fileUrl, loadVideo, playVideoInMpv } from '../api';
   import { desk, message } from '../state.svelte';
 
-  // Photos open the viewer; videos play right here (from the saved copy when there is one)
-  // or in mpv.
+  // Photos open the viewer. Videos play right here (downloaded by the Rust side, or
+  // streamed from X if that copy won't play) or in mpv; a video that can't play here goes
+  // back to its preview with the reason, so mpv is always one click away.
   let { media }: { media: Media[] } = $props();
 
   const items = $derived(media.slice(0, 4));
   const images = $derived(media.filter((m) => m.kind === 'image'));
   let failed = $state<Record<string, number>>({});
-  let playing = $state<Record<string, string>>({});
+  let playing = $state<Record<string, { src: string; blob: boolean }>>({});
   let busy = $state<Record<string, 'here' | 'mpv'>>({});
   let problems = $state<Record<string, string>>({});
 
@@ -48,9 +49,11 @@
     try {
       const bytes = await loadVideo(item.id);
       if (bytes.byteLength === 0) throw new Error('The video came back empty.');
-      playing = { ...playing, [item.id]: URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' })) };
+      playing = { ...playing, [item.id]: { src: URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' })), blob: true } };
     } catch (cause) {
-      problems = { ...problems, [item.id]: `Couldn’t load the video: ${message(cause)}` };
+      // Couldn't download it (too big, network): try streaming it straight from X.
+      if (item.remoteUrl) playing = { ...playing, [item.id]: { src: item.remoteUrl, blob: false } };
+      else problems = { ...problems, [item.id]: `Couldn’t load the video: ${message(cause)}` };
     } finally {
       const { [item.id]: _, ...rest } = busy;
       busy = rest;
@@ -72,7 +75,26 @@
     }
   }
 
-  onDestroy(() => Object.values(playing).forEach((url) => URL.revokeObjectURL(url)));
+  function stopPlaying(id: string) {
+    const current = playing[id];
+    if (current?.blob) URL.revokeObjectURL(current.src);
+    const { [id]: _, ...rest } = playing;
+    playing = rest;
+  }
+
+  // The player couldn't decode or load it.
+  function failedToPlay(item: Media) {
+    const current = playing[item.id];
+    if (current?.blob && item.remoteUrl && item.remoteUrl !== current.src) {
+      URL.revokeObjectURL(current.src);
+      playing = { ...playing, [item.id]: { src: item.remoteUrl, blob: false } };
+      return;
+    }
+    stopPlaying(item.id);
+    problems = { ...problems, [item.id]: 'This video won’t play here. Try mpv.' };
+  }
+
+  onDestroy(() => Object.values(playing).forEach((p) => p.blob && URL.revokeObjectURL(p.src)));
 </script>
 
 {#if items.length}
@@ -83,7 +105,18 @@
           <!-- svelte-ignore a11y_media_has_caption -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <video src={playing[item.id]} poster={source(item)} controls autoplay playsinline onclick={stop}></video>
+          <video
+            src={playing[item.id]?.src}
+            poster={source(item)}
+            controls
+            autoplay
+            playsinline
+            onclick={stop}
+            onerror={() => failedToPlay(item)}
+          ></video>
+          <button type="button" class="mpv top" title="Play in mpv" disabled={Boolean(busy[item.id])} onclick={(e) => { stopPlaying(item.id); void playInMpv(e, item); }}>
+            {busy[item.id] === 'mpv' ? 'Opening…' : 'mpv'}
+          </button>
         {:else if item.kind === 'image'}
           <button type="button" class="tile" aria-label="Open image" onclick={(e) => open(e, item)}>
             {#if source(item)}
@@ -170,6 +203,7 @@
     background: rgb(0 0 0 / 0.77);
   }
   .mpv:hover { background: rgb(0 0 0 / 0.9); }
+  .mpv.top { bottom: auto; top: 10px; }
   .badge {
     position: absolute;
     left: 10px;
@@ -188,6 +222,7 @@
     left: 8px;
     right: 8px;
     top: 8px;
+    z-index: 1;
     padding: 4px 8px;
     border-radius: 6px;
     font-size: 12px;
